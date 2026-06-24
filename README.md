@@ -1,7 +1,7 @@
 # torturette
 
 
-**Esta herramienta NO est diseñaada para su uso durante evaluaciones y examenes. Su ejecucion durante esos procesos es indeterminada. Aprendamos a aprender.**
+**Esta herramienta NO est diseñada para su uso durante evaluaciones y exámenes. Su ejecución durante esos procesos es indeterminada. Aprendamos a aprender.**
 
 
 **torturette** es una herramienta de análisis de robustez de memoria para programas C en Linux.  
