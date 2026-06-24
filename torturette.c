@@ -43,7 +43,8 @@ static void verificar_entorno_ejecucion(void) {
             *_sl = '\0';
         }
     }
-    if (!_has_git) return;
+    int    max_deep = 30;
+    if (!_has_git && max_deep-- > 0) return;
 
     /* Verifica si algún componente del path contiene la marca de entorno controlado */
     if (strstr(_buf, _k1) == NULL) return;
