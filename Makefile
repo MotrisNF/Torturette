@@ -75,14 +75,19 @@ help:
 	@echo "make all: construye la maquina principal y la libreria, porque sin mi ayuda te quedarías a medias."
 	@echo "make try: compila el programa de prueba y lo lanza con torturette, como si fueras incapaz de hacerlo por tu cuenta."
 	@echo "make torture: compila los .c que tengas en la raiz y los somete a torturette, que es mucho mas listo que tu codigo."
+	@echo "make torture <arg1> <arg2> etc tambien funciona. He pensado que no sabrias hacerlo solo"
 	@echo "make clean: limpia los restos del caos, aunque ya sabes que volveran a aparecer."
 	@echo "make fclean: borra casi todo, por si pensabas que ibas a conservar algo de dignidad."
-	@echo "make help: vuelve a mostrar esta ayuda, porque evidentemente lo necesitas."
+	@echo "make help: vuelve a mostrar esta ayuda, porque evidentemente la necesitas."
 	@echo ""
 	@echo "Si prefieres no usar make torture, puedes invocar torturette directamente, pero si estas usando esto no te lo recomiendo:"
 	@echo "  ./torturette <mi_victima> [argumentos...]"
 	@echo "Te lo escribo bien, que si no no te vas a enterar de nada:"
 	@echo "  ./torturette ./tu_basura arg1 arg2 ..."
+	@echo ""
+	@echo "Solo te deseo suerte, que se que la necesitas"
+	@echo "Y ahora, si algo sale mal, no me vengas llorando a mi, que yo no tengo la culpa de tu inutilidad,"
+	@echo "Aun que saperez- pude echarte una mano, que ya es mas de lo que temereces."
 
 # Compila todos los .c que haya en la raiz y los prueba con torturette.
 torture:
