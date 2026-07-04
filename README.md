@@ -1,150 +1,121 @@
-# torturette
+# Torturette
 
+Torturette no es una herramienta más. Es la forma elegante de decirle a un programa que, por muy orgulloso que se sienta, sigue siendo vulnerable a los errores más básicos. Mientras otros programas se pasean por el mundo con su `malloc` y su `free` como si fueran dioses, Torturette entra, les quita la máscara y les demuestra, con una mezcla de frialdad técnica y mala leche bien organizada, que un pequeño fallo de memoria puede ser suficiente para convertir una ejecución brillante en un desastre perfectamente documentado.
 
-**Esta herramienta NO est diseñada para su uso durante evaluaciones y exámenes. Su ejecución durante esos procesos es indeterminada. Aprendamos a aprender.**
+Porque claro, hay gente que escribe software como si todo fuera un juego de niños. Uno compila, uno corre, uno mira que no haya warnings, y ya se cree el dueño del universo. Entonces aparece Torturette, con el entusiasmo de quien sabe que el programa va a caer, y le muestra al usuario final que su binario no era tan invencible como pretendía. Fugas, doble free, aborts, accesos inválidos, señales de muerte y otras pequeñas muestras de incompetencia de bajo nivel: todo eso termina siendo expuesto con una claridad que hace bastante incómoda la experiencia para quien pensaba que su código era “casi estable”.
 
+En resumen, Torturette no busca ser bonito. Busca ser implacable. Es la clase de herramienta que le hace la pregunta incómoda a un programa que pensaba que estaba bien: “¿Y esto qué pasa cuando algo se rompe de verdad?” Y la respuesta, casi siempre, es un montón de inutilidad evidente muy difícil de ignorar.
 
-**torturette** es una herramienta de análisis de robustez de memoria para programas C en Linux.  
-Fuerza, de forma sistemática, que cada `malloc`, `realloc` y `free` del programa objetivo falle por turno, y reporta exactamente qué ocurre: crash, leak, double free, o si el programa lo maneja bien.
+## Qué hace
 
-> Creada por **saperez-** a raíz de la frustración de no poder encontrar los fallos reales de memoria en proyectos del campus 42 — especialmente en `get_next_line` — donde los errores de gestión de memoria solo aparecen cuando una asignación falla en producción, y las herramientas convencionales no simulan ese escenario de forma sencilla.
+El flujo de trabajo de Torturette es relativamente simple en la superficie, pero bastante agresivo en la práctica. El programa:
 
----
+1. muestra un banner inicial y prepara el entorno de ejecución;
+2. ejecuta el binario objetivo en un modo normal para observar su comportamiento base;
+3. lanza una serie de ejecuciones adicionales en segundo plano, forzando situaciones de fallo de asignación o de manejo de memoria;
+4. analiza los resultados y genera un informe con los casos sospechosos, los eventos más relevantes y los puntos donde el fallo parece haber ocurrido.
 
-## Compilación rápida
+No se limita a “reintentar” de forma inocente. Lo que hace es someter al programa a una presión deliberada para comprobar si resiste o si, por el contrario, deja pruebas de su fragilidad en forma de errores, señales, aborts o comportamientos indefinidos.
 
-```bash
-# Compilar torturette
-gcc -Wall -Wextra -o torturette torturette.c
+## Cómo usarlo
 
-# Compilar el programa a analizar (OBLIGATORIO: -g -no-pie)
-gcc -g -no-pie -o mi_programa mi_programa.c
-```
-
-> **`-g`** genera símbolos de debug necesarios para que `addr2line` resuelva archivo:línea exactos.  
-> **`-no-pie`** fija las direcciones del binario en disco. Sin él, ASLR desplaza las direcciones en cada ejecución y `addr2line` no puede mapearlas correctamente.
-
----
-
-## Uso
+Compila el proyecto con:
 
 ```bash
-./torturette ./mi_programa
-./torturette ./mi_programa arg1 arg2    # con argumentos
+make
 ```
 
-torturette acepta cualquier binario como objetivo. Los argumentos adicionales se pasan directamente al programa.
+Luego ejecuta el binario principal así:
 
-### Ejemplo de salida
-
-```
-Calibrando binario objetivo...
-[CALIBRACIÓN] 8 malloc detectados  8 frees detectados
-
-Iniciando Tortura de Memoria
----------------------------------------------------------------------------------
-PRUEBA     | ESCENARIO        | MALLOCS   | FREES   | MEMORIA       | ESTADO
----------------------------------------------------------------------------------
-#01        | Falla Malloc 1   | 0         | 0       | 0          bytes | [PASADO] OK
-#02        | Falla Malloc 2   | 1         | 0       | 0          bytes | [FALLO]  SIGSEGV (Null Pointer)
-#03        | Falla Malloc 3   | 2         | 1       | 32         bytes | [FALLO]  LEAK (+32 bytes colgados)
-#04        | Falla Malloc 4   | 3         | 2       | 0          bytes | [FALLO]  DOUBLE FREE (Abort)
-...
----------------------------------------------------------------------------------
-
->>> Caso FAIL_AFTER=1 (SIGSEGV)
----------------------------------------------------------------------------------
-    Ocurre en      vec_push at mi_programa.c:87
-    Llamado desde  main at mi_programa.c:201
----------------------------------------------------------------------------------
+```bash
+./torturette <programa_objetivo> [argumentos...]
 ```
 
----
+Por ejemplo:
 
-## Cómo funciona
+```bash
+./torturette ./try_me
+```
 
-torturette opera en dos fases:
+También puedes usar los targets auxiliares del Makefile:
 
-**1. Calibración**  
-Ejecuta el programa objetivo una vez sin ningún fallo inyectado, con `LD_PRELOAD` apuntando a `injector.so`. Cuenta el número total de asignaciones de memoria para saber cuántas pruebas hay que realizar.
+```bash
+make try
+make torture
+make help
+make clean
+make fclean
+```
 
-**2. Tortura**  
-Lanza el programa N veces (una por cada malloc detectado). En la prueba número `i`, fuerza que la asignación número `i` devuelva `NULL`. Observa el comportamiento resultante y lo clasifica:
+## Qué ofrece
 
-| Estado | Significado |
-|--------|-------------|
-| `OK` | El programa detectó el fallo y lo gestionó correctamente |
-| `SIGSEGV` | Desreferenciación de NULL — el retorno de malloc no se comprobó |
-| `SIGABRT` | Double free o corrupción de heap detectada por glibc |
-| `DOUBLE FREE` | El injector detectó que se liberó el mismo puntero dos veces |
-| `LEAK` | Malloc sin free correspondiente cuando se tomó la rama de error |
-| `AVISO` | Más `free` que `malloc` — comportamiento anómalo, posible bug |
+- Ejecución normal del programa objetivo.
+- Pruebas automáticas de fallo de memoria.
+- Detección de problemas como:
+  - fugas,
+  - doble free,
+  - crashes por señal,
+  - aborts,
+  - accesos inválidos,
+  - estados de ejecución anómalos.
+- Informe final con información útil para localizar el punto problemático.
+- Integración con un programa de prueba sencillo para simular fallos manualmente.
 
-Cada ejecución corre en un proceso hijo aislado. Si el proceso revienta, torturette captura el backtrace en ese instante exacto mediante `backtrace()`/`backtrace_symbols_fd()` inyectados, y al final muestra el archivo y la línea donde ocurrió el problema.
+## Aspecto técnico
 
----
+Torturette está pensado como una herramienta de análisis orientada a la ejecución y a la observación de comportamientos anómalos. Su diseño se basa en una separación clara entre el orquestador principal, los módulos de ejecución y los módulos de reporte.
 
-## El injector
+### Estructura general
 
-El núcleo de torturette es `injector.so`, una biblioteca compartida que se genera automáticamente en el directorio del propio ejecutable cada vez que se lanza torturette. Se carga en el proceso hijo mediante `LD_PRELOAD`, lo que le permite interceptar `malloc`, `realloc` y `free` antes de que lleguen a glibc.
+El proyecto está compuesto por varios módulos:
 
-El injector:
-- Cuenta cada llamada a `malloc`/`realloc` y activa el fallo en la llamada número `FAIL_AFTER`
-- Rastrea qué bloques están vivos para detectar leaks al salir
-- Mantiene un registro de punteros liberados para detectar double free
-- Instala manejadores para `SIGSEGV` y `SIGABRT` que vuelcan el backtrace justo antes de que el proceso muera
-- Comunica los resultados al proceso padre mediante `stderr` con el formato `[METRICAS]|mallocs|frees|leaks|bytes`
+- `main.c`: coordina la ejecución general del flujo.
+- `motor.c` / `motor.h`: encapsulan la lógica de ejecución del programa objetivo y la gestión de los casos de prueba.
+- `informe.c` / `informe.h`: se encargan de mostrar el banner, resumir los resultados y presentar los informes de fallo.
+- `injector.c`: implementa la lógica relacionada con la inyección de condiciones de prueba y el comportamiento de los casos de fallo.
+- `comun.h`: contiene definiciones y estructuras compartidas usadas por todo el sistema.
+- `try/try_me.c`: es un programa de ejemplo pensado para provocar errores de forma controlada y comprobar cómo reacciona la herramienta.
 
-### Por qué se ignoran los tamaños 1024 y 4096
+### Modelo de ejecución
 
-El injector **no cuenta ni falla** los `malloc` de exactamente 1024 o 4096 bytes. Esta exclusión no es arbitraria: son los tamaños de buffer que glibc usa internamente para operaciones como `fprintf`, `fgets`, o el propio `backtrace_symbols_fd`. Si se contaran, el injector se contaminaría a sí mismo: sus propias llamadas de diagnóstico aparecerían en el conteo del programa objetivo, desplazando todos los índices y produciendo resultados incorrectos o falsos positivos. Al excluir esos dos tamaños, el injector permanece invisible para el sistema de conteo.
+El flujo se puede entender como una combinación entre un análisis base y una fase de estrés. En la primera, Torturette ejecuta el programa objetivo de forma habitual para obtener una referencia de comportamiento. En la segunda, habilita condiciones de fallo artificiales para verificar si el binario se comporta de forma robusta o si deja señales de problemas ocultos.
 
----
+Esta estrategia permite distinguir entre:
 
-## Requisitos
+- fallos que aparecen de inmediato,
+- fallos que se manifiestan solo bajo presión,
+- comportamientos que parecen correctos pero dejan recursos mal gestionados,
+- ejecuciones que terminan abruptamente y deben ser reportadas como fallos de señal o abort.
 
-- Linux (usa `LD_PRELOAD`, `backtrace()`, `/proc/self/exe`, `fork`/`exec`)
-- GCC con soporte para `-shared`, `-fPIC` y `-ldl`
-- `binutils` instalado (`addr2line` para resolver archivo:línea)
-- El programa objetivo debe compilarse con `gcc -g -no-pie`
+### Manejo de resultados
 
-No se necesitan dependencias externas ni instalación. torturette se compila en un único archivo fuente y genera su `injector.so` de forma autónoma en tiempo de ejecución.
+Cuando una prueba detecta un caso sospechoso, la herramienta intenta clasificarlo y resumirlo de forma legible. El reporte incluye información útil para el diagnóstico: tipo de problema, contexto de la ejecución y, cuando es posible, detalles de backtrace u otros datos derivados de la ejecución del binario objetivo.
 
----
+Este enfoque es útil porque convierte un conjunto de fallos crudos en una secuencia de eventos que puede interpretarse de forma mucho más rápida. En otras palabras, no solo se “ve” que algo explotó, sino que también se intenta explicar qué tipo de error fue, dónde puede haber ocurrido y qué clase de comportamiento produjo.
+
+### Relación con depuración
+
+Aunque Torturette puede funcionar con binarios sin características de depuración, el valor del análisis aumenta considerablemente si el programa objetivo se compila con información de depuración. En ese caso, los mensajes y los informes pueden aportar mucho más contexto sobre el punto exacto en que el fallo se produjo.
+
+Por eso, esta herramienta es más útil en entornos de desarrollo o análisis que en un contexto de ejecución final sin supervisión. No reemplaza un depurador ni una auditoría profunda, pero sí ofrece una forma rápida de forzar situaciones de error y observar cómo reacciona el software.
+
+### Programa de prueba
+
+El directorio [try](try) contiene un ejemplo mínimo pensado para demostrar el comportamiento de la herramienta. Ese programa acepta comandos como `malloc`, `calloc`, `mix`, `leak`, `doublefree`, `segfault`, `abort` y `exit`, y permite reproducir varias clases de fallo de forma controlada. Es especialmente útil para ver cómo Torturette reporta distintos tipos de problema sin necesidad de preparar un programa complejo desde cero.
 
 ## Limitaciones
 
-- **Solo Linux.** El mecanismo de `LD_PRELOAD` y `/proc/self/exe` son específicos de Linux. No funciona en macOS ni en sistemas sin soporte de biblioteca dinámica en tiempo de ejecución.
+- No es una herramienta de producción ni un sustituto de un depurador completo.
+- El análisis depende de que el programa objetivo sea compilado con información de depuración si se quiere ver el origen exacto de los fallos.
+- Algunos casos pueden terminar de forma abrupta, lo que es esperable en un entorno de prueba de fallos.
+- El comportamiento puede variar según el sistema, la libc y las opciones de compilación del binario objetivo.
 
-- **No intercepta `mmap` ni `calloc` directo del kernel.** Solo cubre `malloc`, `realloc` y `free`. Programas que reservan memoria directamente con `mmap` o que usan allocators personalizados no serán analizados completamente.
+## Prueba rápida
 
-- **Programas con muchos malloc pueden ser lentos.** La tortura lanza `N` procesos hijos, uno por cada malloc detectado. Un programa con 500 allocations ejecutará 500 veces el binario. En la mayoría de proyectos de 42 esto es instantáneo, pero en programas grandes puede tardar.
-
-- **`-no-pie` es obligatorio para ver archivo:línea.** Si el binario objetivo se compila sin `-no-pie`, torturette seguirá detectando los fallos correctamente, pero el análisis de backtrace mostrará solo `[!] No se pudo resolver ninguna línea` porque `addr2line` no puede mapear direcciones desplazadas por ASLR sin conocer la base de carga del proceso.
-
-- **MAX_TRACK = 2048 bloques vivos simultáneos.** El injector rastrea hasta 2048 punteros activos a la vez. Programas que mantengan más bloques vivos simultáneamente pueden producir falsos negativos en la detección de leaks.
-
-- **Incompatible con Valgrind.** Valgrind intercepta `malloc`/`free` a nivel de símbolo global de la misma forma que `LD_PRELOAD`, por lo que no pueden usarse juntos. Son herramientas complementarias, no combinables.
-
-- **El double free solo se detecta si el puntero pasó antes por `malloc` rastreado.** Punteros en pila, globales, o asignados antes de que el injector se inicializara no aparecen en el registro y su double free podría no detectarse.
-
----
-
-## Archivos de prueba incluidos
-
-| Archivo | Descripción |
-|---------|-------------|
-| `test_victima.c` | Primera batería: SIGSEGV por NULL sin comprobar, double free en lista enlazada, leak en struct con campos múltiples |
-| `test_victima2.c` | Segunda batería: SIGSEGV por `realloc` sin comprobar, double free por referencia externa guardada, leak en lista enlazada con fallo intermedio |
+El directorio [try](try) contiene un pequeño programa de ejemplo pensado para que el usuario pruebe el flujo. Se construye con:
 
 ```bash
-gcc -g -no-pie -o test_victima  test_victima.c
-gcc -g -no-pie -o test_victima2 test_victima2.c
-
-./torturette ./test_victima
-./torturette ./test_victima2
+make try
 ```
 
----
-
-*torturette — saperez- — Campus 42*
+Ese programa permite probar comandos simples para ver cómo reacciona la herramienta y cómo se materializan los fallos en los informes.
