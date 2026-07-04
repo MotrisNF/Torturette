@@ -17,6 +17,14 @@ OBJ_DIR    = obj
 SRCS       = $(SRC_DIR)/main.c $(SRC_DIR)/motor.c $(SRC_DIR)/informe.c
 OBJS       = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
+# Captura argumentos pasados como objetivos extra: `make torture arg1 arg2`
+ARGS := $(filter-out torture,$(MAKECMDGOALS))
+
+.PHONY: $(ARGS)
+
+$(ARGS):
+	@:
+
 all: banner $(NAME) $(INJECTOR) finish
 
 banner:
@@ -25,6 +33,7 @@ banner:
 
 finish:
 	@echo "Ya estas a mi servicio"
+	@for i in 1 2 3; do printf "."; sleep 0.5; done; echo
 	@echo "Si eres igual de tonto de lo que creo, make help te ayudara a serlo algo menos"
 
 $(NAME): $(OBJS)
@@ -51,11 +60,11 @@ $(OBJ_DIR):
 
 clean:
 	@echo "Eliminando restos de torturas anteriores"
-	$(Q)rm -f $(OBJS) $(TRY_BIN)
+	$(Q)rm -f $(OBJS) $(TRY_BIN) a.out
 	$(Q)rm -f $(TRY_DIR)/try_me.c~ 2>/dev/null || true
 
 fclean:
-	@bash -lc 'read -r -p "¿Estas seguro? Aún puedo seguir rompiéndote cosas [y][N] " ans; if [ "$$ans" != "y" ] && [ "$$ans" != "Y" ] && [ -n "$$ans" ]; then echo "Operacion cancelada."; exit 0; fi; $(MAKE) --no-print-directory clean; for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; read -r -p "¿Vas a desacerte de mi? ¿Con lo que hemos vivido juntos? [y][N] " ans2; if [ "$$ans2" != "y" ] && [ "$$ans2" != "Y" ] && [ -n "$$ans2" ]; then echo "Operacion cancelada."; exit 0; fi; for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; echo "Me borras, pero volveras a usarme..."; rm -f $(NAME) $(INJECTOR) .torturete_stdin.tmp; rmdir --ignore-fail-on-non-empty $(OBJ_DIR) 2>/dev/null || true'
+	@bash -lc 'if [ "$(filter re,$(MAKECMDGOALS))" != "" ]; then $(MAKE) --no-print-directory clean >/dev/null 2>&1; rm -f $(NAME) $(INJECTOR) .torturete_stdin.tmp >/dev/null 2>&1; rmdir --ignore-fail-on-non-empty $(OBJ_DIR) 2>/dev/null || true; exit 0; fi; read -r -p "¿Estas seguro? Aún puedo seguir rompiéndote cosas [y][N] " ans; if [ "$$ans" != "y" ] && [ "$$ans" != "Y" ] && [ -n "$$ans" ]; then echo "Operacion cancelada."; exit 0; fi; $(MAKE) --no-print-directory clean; for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; read -r -p "¿Vas a desacerte de mi? ¿Con lo que hemos vivido juntos? [y][N] " ans2; if [ "$$ans2" != "y" ] && [ "$$ans2" != "Y" ] && [ -n "$$ans2" ]; then echo "Operacion cancelada."; exit 0; fi; for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; echo "Me borras, pero volveras a usarme..."; rm -f $(NAME) $(INJECTOR) .torturete_stdin.tmp; rmdir --ignore-fail-on-non-empty $(OBJ_DIR) 2>/dev/null || true'
 
 warning:
 	@echo "No deberias de estar tocando el codigo..."
