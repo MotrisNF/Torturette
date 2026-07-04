@@ -72,6 +72,7 @@ help:
 	@echo "make try: compila el programa de prueba y lo lanza con torturette, como si fueras incapaz de hacerlo por tu cuenta."
 	@echo "make torture: compila los .c que tengas en la raiz y los somete a torturette, que es mucho mas listo que tu codigo."
 	@echo "  (lo que escribas despues se lo pasas de argumento a tu propio binario, ej: make torture arg1 arg2)"
+	@echo "make silence: me callas de una vez, que ya cansa tanto comentario mientras te destrozo el codigo."
 	@echo "make clean: limpia los restos del caos, aunque ya sabes que volveran a aparecer."
 	@echo "make fclean: borra casi todo, por si pensabas que ibas a conservar algo de dignidad."
 	@echo "make help: vuelve a mostrar esta ayuda, porque evidentemente lo necesitas."
@@ -103,6 +104,63 @@ torture:
 		echo "Crea primero la maquina de tortura, inutil"; \
 	fi
 
+ifeq (silence,$(firstword $(MAKECMDGOALS)))
+  SILENCE_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  $(eval $(SILENCE_ARGS):;@:)
+endif
+
+silence:
+	@if [ -x $(NAME) ]; then \
+		bash -lc ' \
+		read -r -p "¿Quieres que me calle? [y][N] " a1; \
+		echo "$$a1"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "¿De verdad, de verdad? [y][N] " a2; \
+		echo "$$a2"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "¿Sabes lo que es un torturette sin voz? Ni yo. [y][N] " a3; \
+		echo "$$a3"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "¿Has pensado en los bugs que se te van a escapar sin mis comentarios? [y][N] " a4; \
+		echo "$$a4"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		echo "Vale... Ejecutando tortura"; \
+		for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; \
+		echo "¿De verdad te lo has creido?"; \
+		sleep 0.8; \
+		read -r -p "¿Prometes portarte bien si me callo? [y][N] " a5; \
+		echo "$$a5"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "¿Seguro seguro seguro? [y][N] " a6; \
+		echo "$$a6"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "Ultima pregunta, lo juro (mentira): ¿en serio quieres silencio? [y][N] " a7; \
+		echo "$$a7"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "Si te digo que si, ¿me dejas en paz? [y][N] " a8; \
+		echo "$$a8"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "¿Y si te cobro por cada pregunta que no contestas? [y][N] " a9; \
+		echo "$$a9"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		read -r -p "Va, esta es la penultima de verdad [y][N] " a10; \
+		echo "$$a10"; \
+		for i in 1 2; do printf "."; sleep 0.5; done; echo; \
+		echo "Dejame pensarlo un momento..."; \
+		for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; \
+		echo "No. Se me habia olvidado con quien estaba hablando."; \
+		echo "Yo no me callo. Nunca lo he hecho, y hoy tampoco va a ser la excepcion..."; \
+		for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo; \
+		$(CC) $(CFLAGS) *.c -o a.out $(LDFLAGS) 2>/dev/null; \
+		if [ -x a.out ]; then \
+			./$(NAME) ./a.out $(SILENCE_ARGS) $(ARGS); \
+		else \
+			echo "No hay nada util que compilar en la raiz"; \
+		fi'; \
+	else \
+		echo "Crea primero la maquina de tortura, inutil"; \
+	fi
+
 re: warning fclean all
 
-.PHONY: all clean fclean re try help torture warning banner finish
+.PHONY: all clean fclean re try help torture silence warning banner finish

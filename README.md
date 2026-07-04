@@ -82,11 +82,14 @@ Por ejemplo:
 make          # construye torturette y el injector
 make try      # compila try_me y lo somete a torturette
 make torture  # compila TODOS los .c de la raiz y los somete a torturette
+make silence  # como torture, pero con torturette calladito.
 make clean    # limpia objetos y binarios de prueba
-make fclean   # limpia todo, con dos preguntas de por medio para que te lo pienses
-make re       # fclean + all, sin preguntas (ya te la jugaste una vez)
+make fclean   # limpia todo. Tu codigo no. A veces hay que ser buena gente
+make re       # fclean + all, por si te piensas que creandolo de nuevo tu codigo se va a arreglar.
 make help     # por si con todo esto no te ha quedado claro
 ```
+
+Sobre `make silence`: existe, funciona, y hace exactamente lo mismo que `make torture` -- compila, ejecuta, reporta. La única diferencia es que antes de arrancar te somete a un interrogatorio digno de aeropuerto, con su propia tanda de "¿seguro?", "¿de verdad de verdad?" y algún que otro farol a mitad de camino. Al final, después de hacerte perder el tiempo que le has pedido que te ahorre, Torturette decide que no, que él no se calla, nunca lo ha hecho y hoy tampoco va a empezar. Y entonces sí, ejecuta con el mismo escándalo de siempre. Si querías silencio de verdad, has topado con la herramienta equivocada.
 
 ## Qué ofrece
 
