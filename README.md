@@ -28,20 +28,20 @@ make
 Luego ejecuta el binario principal así:
 
 ```bash
-./torturette <programa_objetivo> [argumentos...]
+make torture <arg1> <arg2> <arg3>
 ```
 
-Por ejemplo:
+Puedes hacerlo asi:
 
 ```bash
-./torturette ./try_me
+./torturette <programa_objetivo> [argumentos...]
 ```
+*Pero como se que seguramente te cueste mucho esfuerzo hacer mas cosas, no te lo recomiendo.*
 
 También puedes usar los targets auxiliares del Makefile:
 
 ```bash
 make try
-make torture
 make help
 make clean
 make fclean
