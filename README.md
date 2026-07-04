@@ -89,8 +89,6 @@ make re       # fclean + all, por si te piensas que creandolo de nuevo tu codigo
 make help     # por si con todo esto no te ha quedado claro
 ```
 
-Sobre `make silence`: existe, funciona, y hace exactamente lo mismo que `make torture` -- compila, ejecuta, reporta. La única diferencia es que antes de arrancar te somete a un interrogatorio digno de aeropuerto, con su propia tanda de "¿seguro?", "¿de verdad de verdad?" y algún que otro farol a mitad de camino. Al final, después de hacerte perder el tiempo que le has pedido que te ahorre, Torturette decide que no, que él no se calla, nunca lo ha hecho y hoy tampoco va a empezar. Y entonces sí, ejecuta con el mismo escándalo de siempre. Si querías silencio de verdad, has topado con la herramienta equivocada.
-
 ## Qué ofrece
 
 - Ejecución normal del programa objetivo.
