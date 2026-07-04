@@ -24,7 +24,8 @@ banner:
 	@for i in 1 2 3 4 5; do printf "."; sleep 0.5; done; echo
 
 finish:
-	@echo "torturette generada con exito"
+	@echo "Ya estas a mi servicio"
+	@echo "Si eres igual de tonto de lo que creo, make help te ayudara a serlo algo menos"
 
 $(NAME): $(OBJS)
 	$(Q)$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
@@ -83,7 +84,7 @@ torture:
 			sleep 0.5; \
 			./$(NAME) ./a.out $(ARGS); \
 		else \
-			echo "No hay nada util que compilar en la raiz"; \
+			echo "Se que tu programa es malo, pero al menos ponlo aqui para que puedo compilarlo"; \
 		fi; \
 	else \
 		echo "Crea primero la maquina de tortura, inutil"; \
