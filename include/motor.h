@@ -12,6 +12,7 @@
 typedef struct {
     int indice;
     pthread_t hilo;
+    int hilo_ok;   /* 0 si pthread_create fallo (recursos agotados): no se debe hacer join */
     ReporteMetricas resultado;
 } PruebaDiferida;
 

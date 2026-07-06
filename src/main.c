@@ -78,10 +78,7 @@ int main(int argc, char **argv) {
         printf("[" RED "EJECUCION BASE" RESET "] " RED "KO" RESET " -- %d malloc / %d free, " RED "%zu bytes colgados" RESET ".\n",
                base.total_mallocs, base.total_frees, base.bytes_leaked);
         mostrar_backtrace(-1, "LEAK EN EJECUCION BASE", base.backtrace, argv[1]);
-    } else if(base.total_mallocs == 0 && base.total_frees == 0) {
-        printf("[" RED "EJECUCION BASE" RESET "] " RED "KO" RESET " -- %d malloc / %d free. ¿Que se supone que tengo que ver?\n",
-               base.total_mallocs, base.total_frees);
-    } else{
+    } else {
         printf("[" GREEN "EJECUCION BASE" RESET "] " GREEN "OK" RESET " -- %d malloc / %d free, sin fugas.\n",
                base.total_mallocs, base.total_frees);
     }
@@ -92,11 +89,10 @@ int main(int argc, char **argv) {
     pthread_mutex_unlock(&mtx_pruebas);
 
     if (total_pruebas_final == 0) {
-        printf(" " RED "RESULTADO GLOBAL:" RESET " [" RED "KO" RESET "] Si no guardas memoria poco voy a comprobar.\n");
-
-        sem_destroy(&sem); unlink(FICHERO_ENTRADA_GRABADA); 
-        printf(RED "\nSabes que esto va de reservar memoria y esas cosas, ¿no?\n" RESET);
-        return 0;
+        printf(YELLOW "\nNo se detecto ninguna llamada a malloc/calloc/realloc durante la ejecucion.\n" RESET);
+        printf(" " GREEN "RESULTADO GLOBAL:" RESET " [" GREEN "OK" RESET "] El binario no registro operaciones de memoria durante la ejecucion.\n");
+        mostrar_frases_ok_general();
+        sem_destroy(&sem); unlink(FICHERO_ENTRADA_GRABADA); return 0;
     }
 
     qsort(pruebas, total_pruebas_final, sizeof(PruebaDiferida *), comparar_pruebas);
@@ -120,7 +116,9 @@ int main(int argc, char **argv) {
         printf("%-10s | %-16s | " WHITE "%-9d" RESET " | " WHITE "%-7d" RESET " | %-10zu bytes | ",
                num_prueba, escenario, iteracion.total_mallocs, iteracion.total_frees, bytes_netos);
 
-        if (iteracion.total_leaks == -666) {
+        if (!p->hilo_ok) {
+            printf("[" YELLOW "??" RESET "] " YELLOW "NO EJECUTADA (limite de recursos)" RESET "\n");
+        } else if (iteracion.total_leaks == -666) {
             tests_fallados++;
             printf("[" RED "KO" RESET "] " RED "DOUBLE FREE (Abort)" RESET "\n");
             registrar_caso(p->indice, "DOUBLE FREE", iteracion.backtrace);

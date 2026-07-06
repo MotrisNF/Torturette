@@ -152,6 +152,22 @@ static void *hilo_tee_stdin(void *arg) {
     return NULL;
 }
 
+/* Los hilos de prueba diferida no hacen nada pesado: se quedan dormidos
+ * esperando (pthread_cond_wait) y luego hacen fork+exec de un proceso
+ * completamente nuevo (que tiene su propia pila, independiente de este
+ * hilo). El stack por defecto de glibc (8 MB) es una barbaridad para eso,
+ * y para un programa con muchas asignaciones (habitual en un push_swap
+ * real: parseo, nodos de lista, buffers de ordenacion...) puede sumar
+ * decenas de GB de memoria virtual solo en pilas, dejando el sistema
+ * arrastrandose o el propio pthread_create fallando en cadena. Con 64 KB
+ * de sobra para todo lo que hace este hilo. */
+#define STACK_HILO_DIFERIDA (64 * 1024)
+
+/* Contador de progreso de las pruebas diferidas ya completadas: solo para
+ * que el usuario vea que la herramienta avanza en vez de parecer colgada
+ * cuando el programa objetivo genera miles de asignaciones. */
+static int completadas_pruebas = 0;
+
 static void *hilo_prueba_diferida(void *arg) {
     PruebaDiferida *p = (PruebaDiferida *)arg;
 
@@ -163,6 +179,13 @@ static void *hilo_prueba_diferida(void *arg) {
     sem_wait(g_sem_concurrencia);
     p->resultado = ejecutar_hijo_y_analizar(p->indice, g_argv_objetivo);
     sem_post(g_sem_concurrencia);
+
+    pthread_mutex_lock(&mtx_pruebas);
+    completadas_pruebas++;
+    int hechas = completadas_pruebas, total = total_pruebas;
+    pthread_mutex_unlock(&mtx_pruebas);
+    fprintf(stderr, "\r" YELLOW "Progreso: %d/%d pruebas de fallo de malloc completadas..." RESET, hechas, total);
+    fflush(stderr);
     return NULL;
 }
 
@@ -172,6 +195,7 @@ static void registrar_malloc_evento(int indice) {
     PruebaDiferida *p = (PruebaDiferida *)malloc(sizeof(PruebaDiferida));
     if (!p) return;
     p->indice = indice;
+    p->hilo_ok = 0;
     p->resultado = (ReporteMetricas){0, 0, 0, 0, 0, NULL};
 
     pthread_mutex_lock(&mtx_pruebas);
@@ -186,7 +210,23 @@ static void registrar_malloc_evento(int indice) {
     pruebas[mi_indice] = p;
     pthread_mutex_unlock(&mtx_pruebas);
 
-    pthread_create(&p->hilo, NULL, hilo_prueba_diferida, p);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, STACK_HILO_DIFERIDA);
+    int rc = pthread_create(&p->hilo, &attr, hilo_prueba_diferida, p);
+    pthread_attr_destroy(&attr);
+    if (rc == 0) {
+        p->hilo_ok = 1;
+    } else {
+        /* No se ha podido crear el hilo (limite de recursos alcanzado).
+         * Se marca la prueba como no ejecutada en vez de dejar un pthread_t
+         * basura que luego provocaria un pthread_join indefinido. Tambien
+         * cuenta como "completada" para que el contador de progreso llegue
+         * al total y no se quede colgado esperando algo que nunca correra. */
+        pthread_mutex_lock(&mtx_pruebas);
+        completadas_pruebas++;
+        pthread_mutex_unlock(&mtx_pruebas);
+    }
 }
 
 ReporteMetricas ejecutar_vivo_y_lanzar_diferidas(char **argv_objetivo, sem_t *sem_concurrencia) {
@@ -326,7 +366,10 @@ ReporteMetricas ejecutar_vivo_y_lanzar_diferidas(char **argv_objetivo, sem_t *se
     pthread_mutex_lock(&mtx_pruebas);
     int total_actual = total_pruebas;
     pthread_mutex_unlock(&mtx_pruebas);
-    for (int i = 0; i < total_actual; i++) pthread_join(pruebas[i]->hilo, NULL);
+    for (int i = 0; i < total_actual; i++) {
+        if (pruebas[i]->hilo_ok) pthread_join(pruebas[i]->hilo, NULL);
+    }
+    if (total_actual > 0) fprintf(stderr, "\n");
 
     return rep_vivo;
 }
