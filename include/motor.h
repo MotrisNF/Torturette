@@ -13,6 +13,8 @@
  * de una en una, en el mismo orden en que ocurren durante la ejecucion. */
 typedef struct {
     int indice;
+    int es_pthread; /* 1 si esta prueba es un fallo forzado de
+                        pthread_create() en vez de malloc/calloc/realloc */
     ReporteMetricas resultado;
 } PruebaDiferida;
 

@@ -3,6 +3,97 @@
 #include <string.h>
 #include <signal.h>
 
+/* --------------------------------------------------------------------
+ * Simula una lista enlazada de tokens (el tipo de estructura que aparece
+ * en minishell, un parser, o cualquier proyecto que trocea una entrada).
+ * BUENA PRACTICA: si a mitad de construir la lista falla una reserva, se
+ * libera TODO lo que ya se habia reservado antes de devolver NULL. Si
+ * torturette hace fallar cualquiera de estos malloc, el resultado debe
+ * ser siempre OK: ni fugas ni crashes, solo un NULL bien manejado.
+ * -------------------------------------------------------------------- */
+typedef struct s_token {
+    char *texto;
+    struct s_token *siguiente;
+} t_token;
+
+static void liberar_tokens(t_token *lista) {
+    while (lista) {
+        t_token *siguiente = lista->siguiente;
+        free(lista->texto);
+        free(lista);
+        lista = siguiente;
+    }
+}
+
+static t_token *construir_tokens(void) {
+    const char *palabras[] = { "cd", "ls", "-la", "|", "grep", "foo" };
+    size_t n = sizeof(palabras) / sizeof(*palabras);
+    t_token *cabeza = NULL, *cola = NULL;
+
+    for (size_t i = 0; i < n; i++) {
+        t_token *nodo = malloc(sizeof(t_token));
+        if (!nodo) { liberar_tokens(cabeza); return NULL; }
+        nodo->texto = strdup(palabras[i]);
+        if (!nodo->texto) { free(nodo); liberar_tokens(cabeza); return NULL; }
+        nodo->siguiente = NULL;
+        if (!cabeza) cabeza = nodo; else cola->siguiente = nodo;
+        cola = nodo;
+    }
+    return cabeza;
+}
+
+/* --------------------------------------------------------------------
+ * Simula una matriz (filas de un stack tipo push_swap, un tablero,
+ * lo que sea). MALA PRACTICA real y comun: si falla la reserva de una
+ * fila que no sea la primera, las filas anteriores YA reservadas no se
+ * liberan. Si torturette hace fallar el calloc de la fila 0, el
+ * resultado es OK (nada que perder todavia); si falla en cualquier fila
+ * posterior, el resultado debe ser KO (fuga de las filas previas).
+ * -------------------------------------------------------------------- */
+#define FILAS 4
+#define COLUMNAS 4
+
+static int **construir_matriz(void) {
+    int **matriz = malloc(sizeof(int *) * FILAS);
+    if (!matriz) return NULL;
+    for (int i = 0; i < FILAS; i++) {
+        matriz[i] = calloc(COLUMNAS, sizeof(int));
+        if (!matriz[i]) return NULL; /* aqui esta el bug: no se liberan
+                                         ni 'matriz' ni las filas 0..i-1 */
+        for (int j = 0; j < COLUMNAS; j++) matriz[i][j] = (int)(i * COLUMNAS + j);
+    }
+    return matriz;
+}
+
+static void liberar_matriz(int **matriz) {
+    if (!matriz) return;
+    for (int i = 0; i < FILAS; i++) free(matriz[i]);
+    free(matriz);
+}
+
+/* --------------------------------------------------------------------
+ * Simula un buffer que va creciendo a base de leer trozos, al estilo
+ * get_next_line. MALA PRACTICA muy real y muy comun: reasignar el
+ * puntero original directamente con el resultado de realloc(). Si
+ * realloc falla, se pierde para siempre el puntero al bloque original
+ * -- fuga garantizada, y encima ya no hay forma de recuperarlo. Si
+ * torturette hace fallar el malloc inicial, el resultado es OK; si hace
+ * fallar cualquiera de los realloc posteriores, el resultado es KO.
+ * -------------------------------------------------------------------- */
+static char *buffer_creciente(void) {
+    char *buf = malloc(4);
+    if (!buf) return NULL;
+    strcpy(buf, "GNL");
+    for (int i = 0; i < 3; i++) {
+        size_t nuevo_tam = strlen(buf) + 5;
+        buf = realloc(buf, nuevo_tam); /* si esto falla, el buffer viejo
+                                           se acaba de perder */
+        if (!buf) return NULL;
+        strcat(buf, "_x");
+    }
+    return buf;
+}
+
 static void provocar_leak(void) {
     char *p = malloc(64);
     if (!p) return;
@@ -28,32 +119,7 @@ static void provocar_sigabrt(void) {
     abort();
 }
 
-static void *forzar_malloc(size_t size) {
-    void *p = malloc(size);
-    if (!p) {
-        fprintf(stderr, "[malloc] fallo catastrfico: no se pudo reservar %zu bytes\n", size);
-        provocar_leak();
-        provocar_double_free();
-        provocar_sigabrt();
-    }
-    return p;
-}
-
-static void *forzar_calloc(size_t count, size_t size) {
-    void *p = calloc(count, size);
-    if (!p) {
-        fprintf(stderr, "[calloc] fallo catastrfico: no se pudo reservar %zu x %zu bytes\n", count, size);
-        provocar_leak();
-        provocar_sigsegv();
-    }
-    return p;
-}
-
 int main(void) {
-    char *texto = NULL;
-    int *nums = NULL;
-    char *extra = NULL;
-
     printf("Escribe algo y pulsa Enter para continuar.\n");
     printf("Prueba comandos como: malloc, calloc, mix, leak, doublefree, segfault, abort o exit.\n");
     printf("Cuando quieras terminar, escribe: exit\n");
@@ -76,33 +142,31 @@ int main(void) {
         }
 
         if (strcmp(buffer, "malloc") == 0) {
-            texto = forzar_malloc(32);
-            if (texto) {
-                snprintf(texto, 32, "memoria malloc");
-                printf("Allocado con malloc: %s\n", texto);
-                free(texto);
-                texto = NULL;
+            t_token *tokens = construir_tokens();
+            if (tokens) {
+                printf("Tokens:");
+                for (t_token *t = tokens; t; t = t->siguiente) printf(" %s", t->texto);
+                printf("\n");
+                liberar_tokens(tokens);
+            } else {
+                printf("No se pudieron construir los tokens (memoria agotada, gestionado sin fugas).\n");
             }
         } else if (strcmp(buffer, "calloc") == 0) {
-            nums = forzar_calloc(5, sizeof(int));
-            if (nums) {
-                printf("Allocado con calloc: %d %d %d %d %d\n", nums[0], nums[1], nums[2], nums[3], nums[4]);
-                free(nums);
-                nums = NULL;
+            int **matriz = construir_matriz();
+            if (matriz) {
+                printf("Matriz %dx%d construida, esquina inferior derecha: %d\n",
+                       FILAS, COLUMNAS, matriz[FILAS - 1][COLUMNAS - 1]);
+                liberar_matriz(matriz);
+            } else {
+                printf("No se pudo construir la matriz completa.\n");
             }
         } else if (strcmp(buffer, "mix") == 0) {
-            texto = forzar_malloc(64);
-            nums = forzar_calloc(3, sizeof(int));
-            if (texto && nums) {
-                snprintf(texto, 64, "mix ok");
-                printf("Escenario mix: %s\n", texto);
-                free(texto);
-                free(nums);
-                texto = NULL;
-                nums = NULL;
+            char *buf = buffer_creciente();
+            if (buf) {
+                printf("Buffer creciente: %s\n", buf);
+                free(buf);
             } else {
-                free(texto);
-                free(nums);
+                printf("El buffer no llego a completarse.\n");
             }
         } else if (strcmp(buffer, "leak") == 0) {
             provocar_leak();
@@ -117,8 +181,5 @@ int main(void) {
         }
     }
 
-    free(texto);
-    free(nums);
-    free(extra);
     return 0;
 }

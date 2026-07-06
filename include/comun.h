@@ -20,10 +20,18 @@
 typedef struct {
     int total_mallocs;
     int total_frees;
-    int total_leaks;   /* -666 = double free detectado */
+    int total_leaks;   /* -666 = double free detectado, -667 = cuelgue (timeout) */
     size_t bytes_leaked;
     int fue_crash;      /* numero de señal (11=SIGSEGV, 6=SIGABRT, 2=SIGINT...), o 0 */
     char *backtrace;    /* backtrace crudo capturado por el injector, o NULL */
+    char *salida_colgada; /* si total_leaks==-667: lo que el hijo de prueba
+                             llego a imprimir antes de quedarse dormido para
+                             siempre y ser matado por timeout, o NULL */
+    size_t bytes_reservados; /* suma de tamaños de TODAS las reservas del
+                                 binario objetivo (malloc/calloc/realloc),
+                                 se hayan liberado luego o no */
+    size_t bytes_liberados;  /* suma de tamaños de las reservas que si se
+                                 llegaron a liberar correctamente */
 } ReporteMetricas;
 
 #endif

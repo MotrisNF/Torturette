@@ -92,14 +92,15 @@ make help     # por si con todo esto no te ha quedado claro
 ## Qué ofrece
 
 - Ejecución normal del programa objetivo.
-- Pruebas automáticas de fallo de memoria.
+- Pruebas automáticas de fallo de memoria (`malloc`/`calloc`/`realloc`) y de creación de hilos (`pthread_create`).
 - Detección de problemas como:
   - fugas,
   - doble free,
   - crashes por señal,
   - aborts,
   - accesos inválidos,
-  - estados de ejecución anómalos.
+  - estados de ejecución anómalos,
+  - hilos que se quedan colgados para siempre cuando algo básico (memoria, un hilo) falla y tu código no lo esperaba.
 - Informe final con información útil para localizar el punto problemático.
 - Integración con un programa de prueba sencillo para simular fallos manualmente.
 
@@ -135,6 +136,12 @@ Cuando una prueba detecta un caso sospechoso, la herramienta intenta clasificarl
 
 Este enfoque es útil porque convierte un conjunto de fallos crudos en una secuencia de eventos que puede interpretarse de forma mucho más rápida. En otras palabras, no solo se "ve" que algo explotó, sino que también se intenta explicar qué tipo de error fue, dónde puede haber ocurrido y qué clase de comportamiento produjo.
 
+### Hilos que no despiertan
+
+`pthread_create()` puede fallar igual que `malloc()` -- normalmente porque el sistema ha agotado el límite de hilos/procesos del usuario (`ulimit -u`), algo mucho más fácil de encontrarse en un ordenador compartido o en un contenedor restringido que en tu propia máquina. Torturette prueba también esto: por cada `pthread_create()` real que hace el binario objetivo, comprueba qué pasaría si esa creación de hilo en concreto fallase.
+
+Aquí es donde aparece el problema que de verdad importa: si tu programa no comprueba ese fallo, o lo comprueba pero algún otro hilo ya en marcha se queda esperando (un mutex, un semáforo, una barrera) a que ese hilo que nunca llegó a existir haga algo, tu programa se queda dormido para siempre. Sin límite de tiempo, Torturette se quedaría esperando junto a él, indistinguible de que se hubiese colgado él mismo. Por eso cada prueba tiene un tiempo máximo de espera (por defecto, 5 segundos; ajustable con la variable de entorno `TORTURETTE_TIMEOUT_SEG` si tu máquina va justa de RAM y necesitas más margen antes de dar algo por colgado). Si se agota, el caso se reporta como `CUELGUE`, junto con lo último que el programa llegó a imprimir antes de quedarse dormido.
+
 ### Relación con depuración
 
 Aunque Torturette puede funcionar con binarios sin características de depuración, el valor del análisis aumenta considerablemente si el programa objetivo se compila con información de depuración. En ese caso, los mensajes y los informes pueden aportar mucho más contexto sobre el punto exacto en que el fallo se produjo.
@@ -145,16 +152,18 @@ Por eso, esta herramienta es más útil en entornos de desarrollo o análisis qu
 
 El directorio [try](try) contiene un ejemplo mínimo pensado para demostrar el comportamiento de la herramienta. Ese programa acepta los siguientes comandos:
 
-| Comando      | Qué provoca                                  |
-|--------------|-----------------------------------------------|
-| `malloc`     | reserva de memoria simple                     |
-| `calloc`     | reserva de memoria inicializada a cero        |
-| `mix`        | combinación de varias operaciones de memoria  |
-| `leak`       | fuga de memoria, a propósito                  |
-| `doublefree` | liberar lo mismo dos veces, por si acaso      |
-| `segfault`   | acceso inválido directo, sin anestesia        |
-| `abort`      | terminación abrupta controlada                |
-| `exit`       | salida normal, para que veas que también sabe hacer eso |
+| Comando      | Qué provoca                                                                 |
+|--------------|-------------------------------------------------------------------------------|
+| `malloc`     | construye una lista enlazada liberando bien cualquier fallo a medias (sin fugas, para que veas que también se puede hacer bien) |
+| `calloc`     | construye una matriz con un fallo real y muy común: si falla a medias, no libera lo ya reservado |
+| `mix`        | un buffer que crece con `realloc()`, con el clásico error de perder el puntero viejo si `realloc()` falla |
+| `leak`       | fuga de memoria, a propósito                                                   |
+| `doublefree` | liberar lo mismo dos veces, por si acaso                                       |
+| `segfault`   | acceso inválido directo, sin anestesia                                        |
+| `abort`      | terminación abrupta controlada                                                 |
+| `exit`       | salida normal, para que veas que también sabe hacer eso                       |
+
+`malloc`, `calloc` y `mix` no fallan nunca por sí solos: es Torturette quien, probando cada reserva de memoria una a una, decide si tu código sabe sobrevivir a que le fallen. `malloc` está bien escrito a propósito (para que compruebes que Torturette también sabe decir que algo está bien cuando lo está); `calloc` y `mix` tienen bugs reales y comunes -- de los que se ven constantemente en proyectos de la escuela -- para que veas cómo se ven en el informe.
 
 Es especialmente útil para ver cómo Torturette reporta distintos tipos de problema sin necesidad de preparar un programa complejo desde cero.
 
@@ -164,6 +173,7 @@ Es especialmente útil para ver cómo Torturette reporta distintos tipos de prob
 - El análisis depende de que el programa objetivo sea compilado con información de depuración si se quiere ver el origen exacto de los fallos.
 - Algunos casos pueden terminar de forma abrupta, lo que es esperable en un entorno de prueba de fallos.
 - El comportamiento puede variar según el sistema, la libc y las opciones de compilación del binario objetivo.
+- Cada prueba se hace con un `fork()` en el instante exacto de la llamada -- y `fork()` solo conserva el hilo que lo invoca, el resto de hilos que ya existieran en ese momento no pasan al proceso de prueba. Si tu programa crea varios hilos y luego espera a los primeros (`pthread_join`) después de que uno posterior falle, la prueba de ESE hilo posterior puede dar un resultado (crash o cuelgue) que refleja esta limitación de `fork()` más que un fallo real de tu código. La prueba del *primer* `pthread_create()`, y en general cualquier fallo de memoria/hilo que no dependa de hilos previos ya vivos, no tiene este problema.
 
 ## Prueba rápida
 
