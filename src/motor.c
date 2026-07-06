@@ -48,12 +48,26 @@ static void anadir_prueba(int indice, int es_pthread, ReporteMetricas resultado)
     if (total_pruebas >= capacidad_pruebas) {
         int nueva_cap = capacidad_pruebas ? capacidad_pruebas * 2 : 64;
         PruebaDiferida **nuevo = (PruebaDiferida **)realloc(pruebas, nueva_cap * sizeof(PruebaDiferida *));
-        if (!nuevo) return;
+        if (!nuevo) {
+            /* Memoria agotada para la propia contabilidad de torturete (no
+             * del binario objetivo): 'resultado' ya trae backtrace/salida
+             * colgada reservados en procesar_eventos() y con la propiedad
+             * ya transferida (el llamador se quedo sin su propia
+             * referencia) -- si no se guarda esta prueba, hay que
+             * liberarlos aqui o se pierden para siempre. */
+            free(resultado.backtrace);
+            free(resultado.salida_colgada);
+            return;
+        }
         pruebas = nuevo;
         capacidad_pruebas = nueva_cap;
     }
     PruebaDiferida *p = (PruebaDiferida *)malloc(sizeof(PruebaDiferida));
-    if (!p) return;
+    if (!p) {
+        free(resultado.backtrace);
+        free(resultado.salida_colgada);
+        return;
+    }
     p->indice = indice;
     p->es_pthread = es_pthread;
     p->resultado = resultado;
