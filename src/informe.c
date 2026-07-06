@@ -97,6 +97,7 @@ void mostrar_backtrace(int fail_after, const char *motivo, const char *backtrace
         char *cb = ab ? strchr(ab, ']') : NULL;
         char resuelto[512] = {0};
         int resuelto_ok = 0;
+        int solo_funcion_sin_linea = 0; /* se resolvio el nombre de la funcion, pero no el archivo:linea (falta -g) */
 
         if (ab && cb && cb > ab + 1) {
             char addr[64] = {0};
@@ -112,10 +113,23 @@ void mostrar_backtrace(int fail_after, const char *motivo, const char *backtrace
                     FILE *p = popen(cmd, "r");
                     if (p) {
                         if (fgets(resuelto, sizeof(resuelto), p)) {
-                            if (strstr(resuelto, "??:0") == NULL && strstr(resuelto, "?? ") == NULL) {
-                                size_t rl = strlen(resuelto);
-                                if (rl > 0 && resuelto[rl - 1] == '\n') resuelto[rl - 1] = '\0';
+                            size_t rl = strlen(resuelto);
+                            if (rl > 0 && resuelto[rl - 1] == '\n') resuelto[rl - 1] = '\0';
+                            /* addr2line marca lo que no puede resolver con "??" --
+                             * la linea sin depurar sale como "??:0" O "??:?" segun
+                             * la version (un descuido anterior solo miraba "??:0",
+                             * dejando pasar el caso "??:?" como si estuviera bien
+                             * resuelto). Si TODO es "??" (funcion Y linea), no hay
+                             * nada aprovechable. Si solo falta la linea pero la
+                             * funcion si se identifico, aun merece la pena
+                             * mostrarla -- es mas util que nada. */
+                            int funcion_desconocida = (strncmp(resuelto, "??", 2) == 0);
+                            int linea_desconocida = (strstr(resuelto, "??:0") != NULL || strstr(resuelto, "??:?") != NULL);
+                            if (!funcion_desconocida && !linea_desconocida) {
                                 resuelto_ok = 1;
+                            } else if (!funcion_desconocida && linea_desconocida) {
+                                resuelto_ok = 1;
+                                solo_funcion_sin_linea = 1;
                             }
                         }
                         pclose(p);
@@ -125,15 +139,26 @@ void mostrar_backtrace(int fail_after, const char *motivo, const char *backtrace
         }
 
         if (resuelto_ok) {
-            printf("    " WHITE "%-14s" RESET GREEN " %s" RESET "\n", etiquetas[mostrados], resuelto);
+            if (solo_funcion_sin_linea) {
+                char solo_nombre[256] = {0};
+                char *pos_at = strstr(resuelto, " at ");
+                size_t len_nombre = pos_at ? (size_t)(pos_at - resuelto) : strlen(resuelto);
+                if (len_nombre >= sizeof(solo_nombre)) len_nombre = sizeof(solo_nombre) - 1;
+                memcpy(solo_nombre, resuelto, len_nombre);
+                solo_nombre[len_nombre] = '\0';
+                printf("    " WHITE "%-14s" RESET YELLOW " %s() (compila con -g para ver la linea exacta)" RESET "\n", etiquetas[mostrados], solo_nombre);
+            } else {
+                printf("    " WHITE "%-14s" RESET GREEN " %s" RESET "\n", etiquetas[mostrados], resuelto);
+            }
             mostrados++;
         }
         linea = strtok(NULL, "\n");
     }
 
     if (mostrados == 0) {
-        printf(YELLOW "[!] No se pudo resolver ninguna linea. Ni yo se donde la has liado.\n" RESET);
-        printf(YELLOW "    Usa make torture, inutil\n" RESET);
+        printf(YELLOW "[!] No se pudo resolver ninguna linea (ni la funcion ni el archivo).\n" RESET);
+        printf(YELLOW "    Prueba a compilar con -g (informacion de depuracion) para que se pueda\n" RESET);
+        printf(YELLOW "    identificar donde ha pasado esto. Sin eso, voy tan a ciegas como tu.\n" RESET);
     }
 
     free(copia);
