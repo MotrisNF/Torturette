@@ -26,7 +26,7 @@ static void liberar_tokens(t_token *lista) {
 }
 
 static t_token *construir_tokens(void) {
-    const char *palabras[] = { "cd", "ls", "-la", "|", "grep", "foo" };
+    const char *palabras[] = { "esto", "no", "lo", "vas", "a", "romper" };
     size_t n = sizeof(palabras) / sizeof(*palabras);
     t_token *cabeza = NULL, *cola = NULL;
 
@@ -154,7 +154,7 @@ int main(void) {
         } else if (strcmp(buffer, "calloc") == 0) {
             int **matriz = construir_matriz();
             if (matriz) {
-                printf("Matriz %dx%d construida, esquina inferior derecha: %d\n",
+                printf("Matriz %dx%d construida, ancho: %d\n",
                        FILAS, COLUMNAS, matriz[FILAS - 1][COLUMNAS - 1]);
                 liberar_matriz(matriz);
             } else {
