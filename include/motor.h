@@ -1,45 +1,40 @@
 #ifndef MOTOR_H
 #define MOTOR_H
 
-#include <pthread.h>
-#include <semaphore.h>
 #include "comun.h"
 
-/* Una prueba diferida: reproduce que pasaria si la llamada de malloc/
- * calloc/realloc numero 'indice' hubiese fallado. Se lanza en tiempo real
- * en cuanto esa llamada ocurre durante la ejecucion en vivo, y se queda
- * dormida hasta que dicha ejecucion en vivo termina. */
+/* Resultado de probar que pasaria si la llamada de malloc/calloc/realloc
+ * numero 'indice' hubiese fallado. Se obtiene haciendo un fork() dentro
+ * del propio proceso objetivo, en el instante exacto de esa llamada (ver
+ * injector.c): el hijo hereda el estado real hasta ese punto, se le
+ * fuerza a fallar esa unica reserva, y se le deja seguir ejecutandose
+ * para ver que pasa. El padre (la ejecucion en vivo real) espera a que
+ * el hijo termine antes de continuar -- por eso las pruebas se procesan
+ * de una en una, en el mismo orden en que ocurren durante la ejecucion. */
 typedef struct {
     int indice;
-    pthread_t hilo;
-    int hilo_ok;   /* 0 si pthread_create fallo (recursos agotados): no se debe hacer join */
     ReporteMetricas resultado;
 } PruebaDiferida;
 
-/* Estado global de las pruebas diferidas ya lanzadas/en curso. Se exponen
- * para que el llamador (main) pueda recorrerlas una vez termine la
- * ejecucion en vivo. */
+/* Lista de resultados recogidos durante la ejecucion en vivo. Se rellena
+ * dentro de ejecutar_vivo_y_lanzar_diferidas() a medida que se leen los
+ * eventos del canal fd 3; para cuando esa funcion retorna, ya esta
+ * completa. */
 extern PruebaDiferida **pruebas;
 extern int total_pruebas;
-extern pthread_mutex_t mtx_pruebas;
 
 /* Ruta absoluta de injector.so, calculada a partir de la ubicacion del
  * propio ejecutable de torturete (no depende del directorio de trabajo). */
 void motor_configurar_ruta_injector(const char *ruta);
 
-/* Numero maximo de pruebas diferidas que se ejecutan en paralelo (procesos
- * hijo simultaneos). Por defecto, uno por CPU; ajustable con la variable
- * de entorno TORTURETE_JOBS. */
-int obtener_max_paralelo(void);
-
-/* Ejecuta el programa objetivo EN VIVO: stdin/stdout/stderr reales,
- * lanzando en tiempo real un hilo dormido por cada malloc/calloc/realloc,
- * y despertandolos a todos en cuanto el programa objetivo termina (de
- * forma normal, por Ctrl+C, por Ctrl+D interpretado por el propio
- * programa, o por un crash real). Al volver, todas las pruebas diferidas
- * ya han terminado y sus resultados estan disponibles en 'pruebas'.
- * Devuelve el resultado de la propia ejecucion en vivo (comportamiento
+/* Ejecuta el programa objetivo con su entrada/salida reales heredadas
+ * directamente (sin grabar ni repetir nada). Cada malloc/calloc/realloc
+ * que hace el programa objetivo se convierte, dentro del injector, en un
+ * fork() que prueba ese fallo concreto y reporta el resultado por el
+ * canal de eventos antes de que la ejecucion en vivo continue. Al
+ * volver, todos los resultados estan disponibles en 'pruebas', y se
+ * devuelve el resultado de la propia ejecucion en vivo (comportamiento
  * base: crash/leak/double-free sin ningun fallo de malloc forzado). */
-ReporteMetricas ejecutar_vivo_y_lanzar_diferidas(char **argv_objetivo, sem_t *sem_concurrencia);
+ReporteMetricas ejecutar_vivo_y_lanzar_diferidas(char **argv_objetivo);
 
 #endif

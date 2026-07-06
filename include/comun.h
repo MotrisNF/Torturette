@@ -17,11 +17,6 @@
  * salida real del programa objetivo. */
 #define FD_EVENTOS 3
 
-/* Fichero donde se graba la entrada real (stdin) que recibio el programa
- * durante su ejecucion en vivo, para poder reproducirsela a cada prueba
- * de fallo de malloc en segundo plano. */
-#define FICHERO_ENTRADA_GRABADA "./.torturete_stdin.tmp"
-
 typedef struct {
     int total_mallocs;
     int total_frees;

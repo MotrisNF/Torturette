@@ -4,6 +4,8 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <pthread.h>
@@ -16,7 +18,19 @@
 static void *asignaciones[MAX_TRACK];
 static size_t tamaños[MAX_TRACK];
 static void *liberados[MAX_TRACK];
-static int idx_liberados = 0, idx_malloc = 0, idx_free = 0, global_counter = 0, fail_after = -2, ya_fallado = 0;
+static int idx_liberados = 0, idx_malloc = 0, idx_free = 0, global_counter = 0, fail_after = -2;
+
+/* Etiqueta que identifica de quien son las metricas/backtraces que se
+ * vuelcan por el canal de eventos (fd 3): "BASE" para la ejecucion en
+ * vivo real, o el numero de la llamada de malloc/calloc/realloc concreta
+ * cuando este proceso es un "hijo de prueba" (ver mas abajo). */
+static char g_etiqueta_proceso[32] = "BASE";
+/* 1 si este proceso es un hijo de prueba (nacio de un fork() dentro de
+ * malloc/calloc/realloc para comprobar que pasa si ESA llamada falla).
+ * Los hijos de prueba nunca vuelven a hacer fork: solo se prueba UNA
+ * llamada por hijo, todas las demas se sirven con normalidad. */
+static int g_es_prueba = 0;
+
 /* NOTA: se usa pthread_key_t (datos especificos de hilo, TSD) en vez de una
    variable "__thread" (TLS de ELF) porque el TLS de ELF en una biblioteca
    cargada por LD_PRELOAD puede fallar (SIGSEGV) al acceder desde hilos
@@ -43,6 +57,23 @@ static int es_tamano_interno_libc(size_t total) {
     return total == 1024 || total == 4096 || total == 272;
 }
 static pthread_mutex_t mtx_tracking = PTHREAD_MUTEX_INITIALIZER;
+/* Mutex APARTE (no mtx_tracking) para serializar el fork-y-espera de las
+ * pruebas: si el programa objetivo tiene varios hilos llamando a malloc a
+ * la vez, solo se prueba un fallo cada vez, nunca en paralelo -- mas
+ * simple y predecible, aunque un pelin mas lento. No se reusa
+ * mtx_tracking porque este mutex se mantiene cogido durante todo el
+ * fork()+waitpid() (que puede tardar), y registrar_ptr() necesita poder
+ * coger mtx_tracking mientras tanto sin bloquearse con esto. */
+static pthread_mutex_t mtx_prueba = PTHREAD_MUTEX_INITIALIZER;
+
+/* Proteccion fork-safety: si otro hilo tuviera mtx_tracking cogido justo
+ * en el instante del fork(), el hijo heredaria ese mutex bloqueado para
+ * siempre (el hilo que lo soltaria no existe en el hijo). Se registran
+ * manejadores atfork para que, alrededor de cualquier fork(), mtx_tracking
+ * este siempre libre. */
+static void atfork_preparar(void) { pthread_mutex_lock(&mtx_tracking); }
+static void atfork_padre(void) { pthread_mutex_unlock(&mtx_tracking); }
+static void atfork_hijo(void) { pthread_mutex_unlock(&mtx_tracking); }
 
 static void inicializar_entorno(void) {
     if (fail_after == -2) {
@@ -52,14 +83,14 @@ static void inicializar_entorno(void) {
 }
 
 /* Vuelca un backtrace legible por el canal de eventos (fd 3), delimitado
-   por marcadores que torturete pueda parsear. Usamos fd 3 en vez de
-   stderr para no ensuciar la salida real del programa objetivo, que en
-   modo EN VIVO se muestra tal cual al usuario. */
+   por marcadores que torturete pueda parsear, etiquetado con de quien es
+   (BASE o el numero de prueba). Usamos fd 3 en vez de stderr para no
+   ensuciar la salida real del programa objetivo. */
 static void volcar_backtrace(const char *etiqueta) {
     fijar_en_diagnostico(1);
     void *frames[MAX_FRAMES];
     int n = backtrace(frames, MAX_FRAMES);
-    dprintf(FD_EVENTOS, "\n[BACKTRACE-INICIO]|%s\n", etiqueta);
+    dprintf(FD_EVENTOS, "\n[BACKTRACE-INICIO]|%s|%s\n", g_etiqueta_proceso, etiqueta);
     backtrace_symbols_fd(frames, n, FD_EVENTOS);
     dprintf(FD_EVENTOS, "[BACKTRACE-FIN]\n");
     fijar_en_diagnostico(0);
@@ -68,50 +99,87 @@ static void volcar_backtrace(const char *etiqueta) {
 static void manejador_señal(int sig) {
     const char *etiqueta = (sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGABRT) ? "SIGABRT" : "OTRA_SENAL";
     volcar_backtrace(etiqueta);
-    dprintf(FD_EVENTOS, "\n[METRICAS]|%d|%d|%d|0\n", idx_malloc, idx_free, fail_after);
+    dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|%d|0\n", g_etiqueta_proceso, idx_malloc, idx_free, fail_after);
     _exit(sig == SIGSEGV ? 11 : 6);
 }
 
 __attribute__((constructor)) static void instalar_manejadores(void) {
     signal(SIGSEGV, manejador_señal);
     signal(SIGABRT, manejador_señal);
-    /* torturete sustituye el stdin real por un pipe (para poder grabarlo y
-       repetirlo en las pruebas diferidas). Eso rompe la deteccion de
-       "entrada interactiva" que usa glibc para volcar automaticamente la
-       salida en linea antes de bloquear en una lectura (p.ej. un prompt
-       "printf" sin salto de linea seguido de "scanf"). Se fuerza stdout
-       sin buffer para que cualquier salida se vea al instante, aunque
-       stdin ya no parezca una terminal. */
     setvbuf(stdout, NULL, _IONBF, 0);
+    pthread_atfork(atfork_preparar, atfork_padre, atfork_hijo);
 }
 
-/* Punto unico de decision, bajo mutex, para saber si la llamada actual de
-   malloc/calloc/realloc debe fallar.
-   - Modo EN VIVO (fail_after == -1): NUNCA falla nada. El programa
-     objetivo se ejecuta con normalidad, con su entrada/salida reales.
-     Cada llamada se anuncia por el canal de eventos (fd 3) como
-     "MALLOC|<numero>", para que torturete pueda lanzar en el acto el
-     hilo "dormido" que mas tarde reproducira ese fallo concreto.
-   - Modo PRUEBA (fail_after == N): hace fallar exactamente la llamada
-     numero N (y solo esa), igual que antes. */
-static int intentar_fallar(void) {
-    int debe_fallar = 0;
-    if (fail_after != -2) {
-        pthread_mutex_lock(&mtx_tracking);
-        if (!ya_fallado) {
-            int current_call = global_counter++;
-            idx_malloc++;
-            if (fail_after == -1) {
-                dprintf(FD_EVENTOS, "MALLOC|%d\n", current_call);
-            } else if (current_call == fail_after) {
-                ya_fallado = 1;
-                idx_malloc--;
-                debe_fallar = 1;
-            }
+/* ---------------------------------------------------------------------
+ * NUCLEO DEL NUEVO MODELO: en vez de que torturete relance el programa
+ * entero desde cero para cada malloc que se quiere probar (con todo lo
+ * que eso implica: grabar/repetir stdin, coordinar hilos y procesos
+ * externos...), se hace un fork() AQUI MISMO, en el instante exacto de
+ * la llamada de malloc/calloc/realloc que toca probar:
+ *
+ *   - El HIJO hereda el estado EXACTO del programa hasta este punto
+ *     (memoria, descriptores de fichero, todo) gracias al propio fork().
+ *     Se le fuerza a que ESTA llamada devuelva NULL, se le aisla la
+ *     entrada/salida (para no interferir con la terminal real), y sigue
+ *     ejecutandose el programa objetivo con toda normalidad a partir de
+ *     ahi -- exactamente como si esa unica reserva hubiese fallado.
+ *     El hijo NUNCA vuelve a hacer fork (g_es_prueba lo impide): solo se
+ *     prueba esa unica llamada; el resto de su ejecucion es real.
+ *
+ *   - El PADRE (la ejecucion en vivo real) espera a que el hijo termine
+ *     (sin limite de tiempo: si el hijo se queda colgado de verdad, el
+ *     padre tambien esperara -- se acepto este compromiso a cambio de
+ *     simplicidad), y despues continua con la reserva real: para el
+ *     padre, esta llamada JAMAS falla.
+ *
+ * Esto es mas lento que probar todo en paralelo, pero es mucho mas
+ * simple y evita de raiz los problemas de recursos (no hay explosion de
+ * hilos ni de procesos: como mucho hay un hijo de prueba vivo a la vez).
+ * --------------------------------------------------------------------- */
+static int intentar_fallar_y_probar(void) {
+    if (fail_after != -1 || g_es_prueba) return 0;
+
+    pthread_mutex_lock(&mtx_prueba);
+
+    pthread_mutex_lock(&mtx_tracking);
+    int mi_indice = global_counter++;
+    idx_malloc++;
+    pthread_mutex_unlock(&mtx_tracking);
+
+    fflush(stdout);
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        /* HIJO DE PRUEBA: esta llamada de malloc/calloc/realloc falla. */
+        g_es_prueba = 1;
+        snprintf(g_etiqueta_proceso, sizeof(g_etiqueta_proceso), "%d", mi_indice);
+
+        /* Aislar la entrada/salida: no debe interferir con la terminal
+         * real de la ejecucion en vivo. Si el programa sigue leyendo
+         * stdin despues de este punto, recibira EOF de inmediato. */
+        int null_fd = open("/dev/null", O_RDWR);
+        if (null_fd != -1) {
+            dup2(null_fd, STDIN_FILENO);
+            dup2(null_fd, STDOUT_FILENO);
+            dup2(null_fd, STDERR_FILENO);
+            if (null_fd > STDERR_FILENO) close(null_fd);
         }
-        pthread_mutex_unlock(&mtx_tracking);
+        return 1; /* esta llamada falla, en el hijo */
     }
-    return debe_fallar;
+
+    if (pid > 0) {
+        /* PADRE: esperamos (sin limite de tiempo) a que el hijo de
+         * prueba termine -- crash, leak, o final limpio -- antes de
+         * seguir con la ejecucion real. El hijo reporta sus propias
+         * metricas/backtraces por el canal de eventos al terminar. */
+        int status;
+        waitpid(pid, &status, 0);
+    }
+    /* Si fork() fallo (pid < 0), simplemente no se prueba este indice y
+     * se sigue con normalidad, como si no hubiera pasado nada. */
+
+    pthread_mutex_unlock(&mtx_prueba);
+    return 0; /* el padre nunca falla esta reserva */
 }
 
 static void registrar_ptr(void *ptr, size_t size) {
@@ -136,7 +204,7 @@ void *malloc(size_t size) {
     if (obtener_en_diagnostico()) return real_malloc(size);
     inicializar_entorno();
     if (fail_after != -2 && !es_tamano_interno_libc(size)) {
-        if (intentar_fallar()) { volcar_backtrace("MALLOC_FALLIDO"); return NULL; }
+        if (intentar_fallar_y_probar()) return NULL;
     }
     void *ptr = real_malloc(size);
     if (ptr && fail_after != -2 && !es_tamano_interno_libc(size)) registrar_ptr(ptr, size);
@@ -167,7 +235,7 @@ void *calloc(size_t nmemb, size_t size) {
     inicializar_entorno();
     size_t total = nmemb * size;
     if (fail_after != -2 && !es_tamano_interno_libc(total)) {
-        if (intentar_fallar()) { volcar_backtrace("CALLOC_FALLIDO"); return NULL; }
+        if (intentar_fallar_y_probar()) return NULL;
     }
     void *ptr = real_calloc(nmemb, size);
     if (ptr && fail_after != -2 && !es_tamano_interno_libc(total)) registrar_ptr(ptr, total);
@@ -180,7 +248,7 @@ void *realloc(void *ptr, size_t size) {
     if (obtener_en_diagnostico()) return real_realloc(ptr, size);
     inicializar_entorno();
     if (fail_after != -2) {
-        if (intentar_fallar()) { volcar_backtrace("REALLOC_FALLIDO"); return NULL; }
+        if (intentar_fallar_y_probar()) return NULL;
     }
     if (ptr && fail_after != -2) {
         pthread_mutex_lock(&mtx_tracking);
@@ -217,7 +285,7 @@ void free(void *ptr) {
     }
     if (es_doble_free) {
         volcar_backtrace("DOUBLE_FREE");
-        dprintf(FD_EVENTOS, "\n[METRICAS]|%d|%d|-666|0\n", idx_malloc, idx_free);
+        dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|-666|0\n", g_etiqueta_proceso, idx_malloc, idx_free);
         _exit(6);
     }
     if (real_free) real_free(ptr);
@@ -234,6 +302,6 @@ __attribute__((destructor)) void reportar_metricas(void) {
         }
         pthread_mutex_unlock(&mtx_tracking);
         if (count_leaks > 0) volcar_backtrace("LEAK_DETECTADO_AL_SALIR");
-        dprintf(FD_EVENTOS, "\n[METRICAS]|%d|%d|%d|%zu\n", idx_malloc, idx_free, count_leaks, bytes_colgados);
+        dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|%d|%zu\n", g_etiqueta_proceso, idx_malloc, idx_free, count_leaks, bytes_colgados);
     }
 }

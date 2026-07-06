@@ -3,8 +3,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <libgen.h>
-#include <semaphore.h>
-#include <pthread.h>
 #include <signal.h>
 #include <time.h>
 
@@ -35,9 +33,6 @@ int main(int argc, char **argv) {
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
     signal(SIGINT, SIG_IGN);  /* si el usuario pulsa Ctrl+C para el programa objetivo,
                                  que no mate tambien a torturete antes de analizar. */
-    signal(SIGPIPE, SIG_IGN); /* el hilo que graba stdin puede escribir a un pipe ya
-                                  cerrado si el hijo termina antes de consumir toda la
-                                  entrada; sin esto, ese write() mataria a torturete. */
     mostrar_banner();
     if (argc < 2) { printf("Uso: %s <programa_objetivo> [argumentos...]\n", *argv); printf(YELLOW "(dime a quien torturar y dejame el resto a mi)\n" RESET); return 1; }
 
@@ -50,16 +45,13 @@ int main(int argc, char **argv) {
     }
     motor_configurar_ruta_injector(ruta_injector);
 
-    int max_paralelo = obtener_max_paralelo();
-    sem_t sem;
-    sem_init(&sem, 0, max_paralelo);
-
-    printf(YELLOW "Ejecutando el programa objetivo de forma normal...\n" RESET);
-    printf(CYAN "(Entrada y salida reales; las pruebas de fallo de malloc se ejecutan en\n" RESET);
-    printf(CYAN " segundo plano al terminar, hasta %d a la vez -- ajustable con TORTURETE_JOBS)\n" RESET, max_paralelo);
+    printf(YELLOW "Ejecutando el programa objetivo...\n" RESET);
+    printf(CYAN "(Entrada y salida reales. Cada malloc/calloc/realloc se prueba en el\n" RESET);
+    printf(CYAN " momento, con un fork() que hereda el estado real -- una prueba cada\n" RESET);
+    printf(CYAN " vez, asi que puede tardar un poco mas de lo normal)\n" RESET);
     printf("---------------------------------------------------------------------------------\n");
 
-    ReporteMetricas base = ejecutar_vivo_y_lanzar_diferidas(argv + 1, &sem);
+    ReporteMetricas base = ejecutar_vivo_y_lanzar_diferidas(argv + 1);
 
     printf("---------------------------------------------------------------------------------\n");
 
@@ -68,6 +60,8 @@ int main(int argc, char **argv) {
         mostrar_backtrace(-1, "DOUBLE FREE EN EJECUCION BASE", base.backtrace, argv[1]);
     } else if (base.fue_crash == 2) {
         printf("[" YELLOW "EJECUCION BASE" RESET "] Interrumpida por el usuario (Ctrl+C).\n");
+    } else if (base.fue_crash == -1) {
+        printf("[" RED "EJECUCION BASE" RESET "] " RED "KO" RESET " -- no se pudo ni arrancar el programa objetivo (fork fallido, recursos agotados).\n");
     } else if (base.fue_crash) {
         const char *motivo = "CRASH";
         if (base.fue_crash == 11) motivo = "SIGSEGV (Null Pointer / Use-After-Free)";
@@ -84,20 +78,18 @@ int main(int argc, char **argv) {
     }
     free(base.backtrace);
 
-    pthread_mutex_lock(&mtx_pruebas);
     int total_pruebas_final = total_pruebas;
-    pthread_mutex_unlock(&mtx_pruebas);
 
     if (total_pruebas_final == 0) {
         printf(YELLOW "\nNo se detecto ninguna llamada a malloc/calloc/realloc durante la ejecucion.\n" RESET);
         printf(" " GREEN "RESULTADO GLOBAL:" RESET " [" GREEN "OK" RESET "] El binario no registro operaciones de memoria durante la ejecucion.\n");
         mostrar_frases_ok_general();
-        sem_destroy(&sem); unlink(FICHERO_ENTRADA_GRABADA); return 0;
+        return 0;
     }
 
     qsort(pruebas, total_pruebas_final, sizeof(PruebaDiferida *), comparar_pruebas);
 
-    printf(YELLOW "\nResultados de las %d pruebas de fallo de malloc (en paralelo, tras el fin del programa)\n" RESET, total_pruebas_final);
+    printf(YELLOW "\nResultados de las %d pruebas de fallo de malloc\n" RESET, total_pruebas_final);
     printf("---------------------------------------------------------------------------------\n");
     printf("%-10s | %-16s | %-9s | %-7s | %-13s | %-10s\n", "PRUEBA", "ESCENARIO", "MALLOCS", "FREES", "MEMORIA", "ESTADO");
     printf("---------------------------------------------------------------------------------\n");
@@ -116,9 +108,7 @@ int main(int argc, char **argv) {
         printf("%-10s | %-16s | " WHITE "%-9d" RESET " | " WHITE "%-7d" RESET " | %-10zu bytes | ",
                num_prueba, escenario, iteracion.total_mallocs, iteracion.total_frees, bytes_netos);
 
-        if (!p->hilo_ok) {
-            printf("[" YELLOW "??" RESET "] " YELLOW "NO EJECUTADA (limite de recursos)" RESET "\n");
-        } else if (iteracion.total_leaks == -666) {
+        if (iteracion.total_leaks == -666) {
             tests_fallados++;
             printf("[" RED "KO" RESET "] " RED "DOUBLE FREE (Abort)" RESET "\n");
             registrar_caso(p->indice, "DOUBLE FREE", iteracion.backtrace);
@@ -154,7 +144,5 @@ int main(int argc, char **argv) {
 
     for (int i = 0; i < total_pruebas_final; i++) free(pruebas[i]);
     free(pruebas);
-    sem_destroy(&sem);
-    unlink(FICHERO_ENTRADA_GRABADA);
     return 0;
 }
