@@ -99,7 +99,13 @@ static void volcar_backtrace(const char *etiqueta) {
 static void manejador_señal(int sig) {
     const char *etiqueta = (sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGABRT) ? "SIGABRT" : "OTRA_SENAL";
     volcar_backtrace(etiqueta);
-    dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|%d|0\n", g_etiqueta_proceso, idx_malloc, idx_free, fail_after);
+    int senal_reportada = (sig == SIGSEGV) ? 11 : (sig == SIGABRT) ? 6 : sig;
+    /* Se incluye la señal explicitamente: torturete ya no hace waitpid()
+     * directo de cada hijo de prueba (nacen dentro de este mismo proceso,
+     * no como procesos separados lanzados por torturete), asi que la
+     * unica forma de que torturete sepa que este proceso crasheo es que
+     * el propio proceso lo diga por el canal de eventos. */
+    dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|0|0|%d\n", g_etiqueta_proceso, idx_malloc, idx_free, senal_reportada);
     _exit(sig == SIGSEGV ? 11 : 6);
 }
 
@@ -285,7 +291,7 @@ void free(void *ptr) {
     }
     if (es_doble_free) {
         volcar_backtrace("DOUBLE_FREE");
-        dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|-666|0\n", g_etiqueta_proceso, idx_malloc, idx_free);
+        dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|-666|0|6\n", g_etiqueta_proceso, idx_malloc, idx_free);
         _exit(6);
     }
     if (real_free) real_free(ptr);
@@ -302,6 +308,6 @@ __attribute__((destructor)) void reportar_metricas(void) {
         }
         pthread_mutex_unlock(&mtx_tracking);
         if (count_leaks > 0) volcar_backtrace("LEAK_DETECTADO_AL_SALIR");
-        dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|%d|%zu\n", g_etiqueta_proceso, idx_malloc, idx_free, count_leaks, bytes_colgados);
+        dprintf(FD_EVENTOS, "\n[METRICAS]|%s|%d|%d|%d|%zu|0\n", g_etiqueta_proceso, idx_malloc, idx_free, count_leaks, bytes_colgados);
     }
 }

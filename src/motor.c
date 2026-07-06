@@ -102,11 +102,15 @@ static void procesar_eventos(char *acumulado, ReporteMetricas *rep_vivo) {
             continue;
         }
 
-        /* sig_met: "[METRICAS]|<etiqueta>|<mallocs>|<frees>|<leaks>|<bytes>" */
+        /* sig_met: "[METRICAS]|<etiqueta>|<mallocs>|<frees>|<leaks>|<bytes>|<senal>"
+         * El campo <senal> es imprescindible para las pruebas (no para
+         * BASE): torturete ya no hace waitpid() directo de cada hijo de
+         * prueba, asi que la unica forma de saber que uno crasheo es que
+         * el propio proceso lo reporte por el canal de eventos. */
         char etiqueta[32] = {0};
-        int m = 0, f = 0, l = 0;
+        int m = 0, f = 0, l = 0, senal = 0;
         size_t b = 0;
-        sscanf(sig_met, "[METRICAS]|%31[^|]|%d|%d|%d|%zu", etiqueta, &m, &f, &l, &b);
+        sscanf(sig_met, "[METRICAS]|%31[^|]|%d|%d|%d|%zu|%d", etiqueta, &m, &f, &l, &b, &senal);
         char *fin_linea = strchr(sig_met, '\n');
         cursor = fin_linea ? fin_linea + 1 : sig_met + strlen(sig_met);
 
@@ -125,7 +129,7 @@ static void procesar_eventos(char *acumulado, ReporteMetricas *rep_vivo) {
             free(rep_vivo->backtrace);
             rep_vivo->backtrace = bt_a_usar;
         } else {
-            ReporteMetricas r = { m, f, l, b, 0, bt_a_usar };
+            ReporteMetricas r = { m, f, l, b, senal, bt_a_usar };
             anadir_prueba(atoi(etiqueta), r);
         }
     }
