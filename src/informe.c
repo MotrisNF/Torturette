@@ -65,6 +65,25 @@ void mostrar_backtrace(int fail_after, const char *motivo, const char *backtrace
     char *copia = strdup(backtrace_crudo);
     if (!copia) { printf(RED "[!] Sin memoria para procesar el backtrace. Ironico, viniendo de esta herramienta.\n\n" RESET); return; }
 
+    /* La primera linea (metida por el injector) trae la base de carga
+     * real del ejecutable: "[BACKTRACE-INICIO]|<etiqueta>|<motivo>|0x...".
+     * Los binarios de hoy en dia se compilan casi siempre PIE (posicion
+     * independiente, con ASLR), asi que las direcciones que da
+     * backtrace() son direcciones de memoria en tiempo de ejecucion, no
+     * offsets de fichero -- y addr2line necesita offsets de fichero. Sin
+     * restar esta base, addr2line falla SIEMPRE con binarios PIE (que
+     * son la mayoria hoy en dia). Con binarios no-PIE la base es 0 y no
+     * cambia nada. */
+    unsigned long base_carga = 0;
+    char *primera_linea_fin = strchr(copia, '\n');
+    if (primera_linea_fin) {
+        char guardado = *primera_linea_fin;
+        *primera_linea_fin = '\0';
+        char *ultima_barra = strrchr(copia, '|');
+        if (ultima_barra) base_carga = strtoul(ultima_barra + 1, NULL, 16);
+        *primera_linea_fin = guardado;
+    }
+
     const char *etiquetas[MAX_FRAMES_MOSTRADOS] = { "Ocurre en", "Llamado desde" };
     int mostrados = 0;
 
@@ -86,8 +105,10 @@ void mostrar_backtrace(int fail_after, const char *motivo, const char *backtrace
                 memcpy(addr, ab + 1, len);
                 addr[len] = '\0';
                 if (addr[0] == '0' && (addr[1] == 'x' || addr[1] == 'X')) {
+                    unsigned long addr_runtime = strtoul(addr, NULL, 16);
+                    unsigned long offset_fichero = (addr_runtime >= base_carga) ? (addr_runtime - base_carga) : addr_runtime;
                     char cmd[512];
-                    snprintf(cmd, sizeof(cmd), "addr2line -e '%s' -f -C -p %s 2>/dev/null", binario, addr);
+                    snprintf(cmd, sizeof(cmd), "addr2line -e '%s' -f -C -p 0x%lx 2>/dev/null", binario, offset_fichero);
                     FILE *p = popen(cmd, "r");
                     if (p) {
                         if (fgets(resuelto, sizeof(resuelto), p)) {

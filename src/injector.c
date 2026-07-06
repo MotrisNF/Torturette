@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <link.h>
 
 #define MAX_TRACK 4096
 #define MAX_FRAMES 32
@@ -86,11 +87,34 @@ static void inicializar_entorno(void) {
    por marcadores que torturete pueda parsear, etiquetado con de quien es
    (BASE o el numero de prueba). Usamos fd 3 en vez de stderr para no
    ensuciar la salida real del programa objetivo. */
+
+/* Los binarios de hoy en dia se compilan casi siempre como PIE (posicion
+ * independiente, con ASLR) -- es el default de gcc en sistemas
+ * modernos. Eso significa que las direcciones que da backtrace() son
+ * direcciones de memoria en tiempo de ejecucion, desplazadas por una
+ * base de carga aleatoria, NO offsets dentro del fichero -- y addr2line
+ * necesita offsets de fichero para poder resolver nada. Sin restar esta
+ * base, addr2line falla siempre (con binarios PIE, siempre; con
+ * binarios no-PIE, la base es 0 y no afecta). Se calcula con
+ * dl_iterate_phdr: el primer objeto que reporta es siempre el propio
+ * ejecutable (los .so cargados van despues). */
+static int callback_dl_iterate(struct dl_phdr_info *info, size_t size, void *data) {
+    (void)size;
+    *(uintptr_t *)data = (uintptr_t)info->dlpi_addr;
+    return 1; /* con el primero (el ejecutable) ya basta; parar aqui */
+}
+static uintptr_t obtener_base_ejecutable(void) {
+    uintptr_t base = 0;
+    dl_iterate_phdr(callback_dl_iterate, &base);
+    return base;
+}
+
 static void volcar_backtrace(const char *etiqueta) {
     fijar_en_diagnostico(1);
     void *frames[MAX_FRAMES];
     int n = backtrace(frames, MAX_FRAMES);
-    dprintf(FD_EVENTOS, "\n[BACKTRACE-INICIO]|%s|%s\n", g_etiqueta_proceso, etiqueta);
+    uintptr_t base = obtener_base_ejecutable();
+    dprintf(FD_EVENTOS, "\n[BACKTRACE-INICIO]|%s|%s|0x%lx\n", g_etiqueta_proceso, etiqueta, (unsigned long)base);
     backtrace_symbols_fd(frames, n, FD_EVENTOS);
     dprintf(FD_EVENTOS, "[BACKTRACE-FIN]\n");
     fijar_en_diagnostico(0);
