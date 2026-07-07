@@ -843,11 +843,20 @@ void free(void *ptr) {
                     break;
                 }
             }
+            /* Solo se cuenta como "free" si el puntero era una asignacion
+             * trackeada (del binario objetivo). Si no se encuentra, es un
+             * free() interno de la libc sobre su propia memoria (p.ej. el
+             * DIR* que closedir() libera dentro de
+             * aislar_ficheros_regulares_del_hijo()) -- nunca deberia
+             * contar como si el programa objetivo hubiera liberado algo
+             * suyo. Antes esto incrementaba idx_free igualmente, inflando
+             * el contador de frees en +1 por cada hijo de prueba sin
+             * relacion con el codigo del usuario. */
             if (encontrado) {
                 idx_free++;
                 if (idx_liberados >= capacidad_liberados) crecer_liberados();
                 if (idx_liberados < capacidad_liberados) { liberados[idx_liberados] = ptr; idx_liberados++; }
-            } else { idx_free++; }
+            }
         }
         pthread_mutex_unlock(&mtx_tracking);
     }
